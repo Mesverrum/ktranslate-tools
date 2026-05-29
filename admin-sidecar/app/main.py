@@ -2,7 +2,7 @@
 FastAPI admin sidecar for KtransToGrafana's multi-credential-group layout.
 
 Thin vertical slice — three endpoints to exercise the full round-trip:
-read → edit → regenerate → SIGHUP. The rest of the planned endpoint
+read → edit → regenerate → SIGUSR2. The rest of the planned endpoint
 surface (devices, discovery, /test, /status) goes in follow-ups once
 the round-trip is verified end-to-end against a live stack.
 """
@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .env_parser import parse_env_file, write_env_file
-from .operations import OperationError, regenerate_groups, sighup_poller
+from .operations import OperationError, regenerate_groups, reload_poller
 
 
 logging.basicConfig(
@@ -139,7 +139,7 @@ def update_group(name: str, update: GroupUpdate) -> GroupDetail:
         write_env_file(path, changes)
         try:
             regenerate_groups(WORKSPACE)
-            sighup_poller(WORKSPACE, name)
+            reload_poller(WORKSPACE, name)
         except OperationError as exc:
             log.error("operation failed: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc

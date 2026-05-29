@@ -4,7 +4,7 @@ Shell out to the existing KtransToGrafana scripts.
 We don't reimplement the generator or the discovery flow in Python —
 they live in scripts/generate-groups.sh and scripts/run-discovery.sh
 inside the workspace, and this sidecar just calls them. That keeps a
-single source of truth for the file format and the SIGHUP logic.
+single source of truth for the file format and the reload logic.
 """
 import logging
 import os
@@ -91,8 +91,13 @@ def regenerate_groups(workspace: Path) -> None:
             log.info("generate: %s", line)
 
 
-def sighup_poller(workspace: Path, group: str) -> bool:
-    """Send SIGHUP to the matching poller container so it re-reads its config.
+def reload_poller(workspace: Path, group: str) -> bool:
+    """Send SIGUSR2 to the matching poller container so it re-reads its config.
+
+    ktranslate's SNMP input handles SIGUSR2 to restart its main loop with the
+    current on-disk config (pkg/inputs/snmp/snmp.go). SIGHUP has no handler
+    and falls through to the default disposition, which terminates the
+    container — so don't send that one.
 
     Returns True if a signal was sent, False if the container wasn't running
     (e.g. first-time setup before `docker compose up`). Failing to signal a
@@ -112,14 +117,14 @@ def sighup_poller(workspace: Path, group: str) -> bool:
 
     if service not in running:
         log.warning(
-            "service %s not in running set; skipping SIGHUP. "
+            "service %s not in running set; skipping reload signal. "
             "Config changes will take effect when the poller next starts.",
             service,
         )
         return False
 
     result = subprocess.run(
-        base + ["kill", "-s", "HUP", service],
+        base + ["kill", "-s", "USR2", service],
         capture_output=True, text=True, check=False,
     )
     if result.returncode != 0:
@@ -127,5 +132,5 @@ def sighup_poller(workspace: Path, group: str) -> bool:
             f"docker compose kill failed (rc={result.returncode}):\n"
             f"stderr:\n{result.stderr}"
         )
-    log.info("sent SIGHUP to %s", service)
+    log.info("sent SIGUSR2 to %s", service)
     return True

@@ -16,7 +16,7 @@ Pre-release; **thin vertical slice only**. The sidecar exposes:
 
 - `GET  /api/groups` — list of credential groups parsed from `groups/*.env`
 - `GET  /api/groups/{name}` — full detail for one group
-- `PUT  /api/groups/{name}` — update one or more fields, regenerate configs, SIGHUP the matching poller
+- `PUT  /api/groups/{name}` — update one or more fields, regenerate configs, SIGUSR2 the matching poller (ktranslate's reload signal — SIGHUP terminates the process)
 
 Grafana dashboards (Infinity-driven list + Volkov Labs Business Forms edit
 page) are the next step. Once the backend round-trip is verified against a
@@ -31,7 +31,7 @@ running stack, the dashboards become a small JSON commit.
 │   - Business Forms (edit)│         │  - /api/groups, /devices    │
 └──────────────────────────┘         │  - shells out to existing   │
                                      │    generate-groups.sh +     │
-                                     │    docker compose kill HUP  │
+                                     │    docker compose kill USR2 │
                                      └────────────┬────────────────┘
                                                   │
                           bind-mounts groups/, state/, scripts/,
@@ -74,7 +74,7 @@ curl -X PUT http://localhost:8000/api/groups/cisco \
 # Side-effects you should see:
 #   - groups/cisco.env updated in place (POLL_INTERVAL_SEC=120)
 #   - scripts/generate-groups.sh re-runs (config/poller-cisco.yaml regenerated)
-#   - docker compose kill -s HUP ktranslate_snmp_cisco fires
+#   - docker compose kill -s USR2 ktranslate_snmp_cisco fires (ktranslate's reload signal)
 ```
 
 ## What's coming next

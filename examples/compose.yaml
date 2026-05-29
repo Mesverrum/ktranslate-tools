@@ -29,8 +29,9 @@ services:
       - type: bind
         source: .
         target: /workspace
-      # docker.sock so the sidecar can `docker compose kill -s HUP <service>`
-      # on the matching poller container after a config write.
+      # docker.sock so the sidecar can `docker compose kill -s USR2 <service>`
+      # on the matching poller container after a config write. SIGUSR2 is
+      # ktranslate's reload signal; SIGHUP would terminate the container.
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - WORKSPACE=/workspace

@@ -28,7 +28,7 @@ COPY app/ ./app/
 
 # Where the KtransToGrafana checkout is bind-mounted at runtime. The
 # sidecar reads groups/*.env, writes them back, runs generate-groups.sh,
-# and signals pollers via `docker compose kill -s HUP` from this path.
+# and signals pollers via `docker compose kill -s USR2` from this path.
 ENV WORKSPACE=/workspace
 
 EXPOSE 8000
