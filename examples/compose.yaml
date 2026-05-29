@@ -1,0 +1,36 @@
+# Compose overlay that adds the ktranslate-tools admin sidecar to a running
+# KtransToGrafana stack (multicontainer_example branch layout).
+#
+# Run from the KtransToGrafana checkout. Adjust the host paths in the volumes
+# section if ktranslate-tools lives somewhere other than ../ktranslate-tools.
+#
+#   docker compose \
+#     -f compose-base.yaml \
+#     -f compose-groups.generated.yaml \
+#     -f ../ktranslate-tools/examples/compose.yaml \
+#     up -d ktranslate-admin
+#
+# Then point Grafana's Infinity datasource at http://<docker-host>:8000/api/.
+
+services:
+  ktranslate-admin:
+    # Build the image from the local source for now (no published image yet).
+    # Switch to ghcr.io/mesverrum/ktranslate-tools-admin:latest once releases ship.
+    build:
+      context: ../ktranslate-tools/admin-sidecar
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      # Bind-mount the KtransToGrafana checkout as /workspace inside the
+      # sidecar. The sidecar reads/writes groups/*.env, calls
+      # scripts/generate-groups.sh, and reads compose-base.yaml +
+      # compose-groups.generated.yaml from this mount.
+      - type: bind
+        source: .
+        target: /workspace
+      # docker.sock so the sidecar can `docker compose kill -s HUP <service>`
+      # on the matching poller container after a config write.
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WORKSPACE=/workspace
