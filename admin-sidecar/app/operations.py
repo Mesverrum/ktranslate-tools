@@ -6,19 +6,72 @@ they live in scripts/generate-groups.sh and scripts/run-discovery.sh
 inside the workspace, and this sidecar just calls them. That keeps a
 single source of truth for the file format and the SIGHUP logic.
 """
+import logging
+import os
 import subprocess
 from pathlib import Path
+
+
+log = logging.getLogger("ktranslate-admin.ops")
 
 
 class OperationError(RuntimeError):
     """A shelled-out script failed; the message contains its stderr."""
 
 
+# --- compose project resolution --------------------------------------------
+
+def _detect_project_name() -> str | None:
+    """Find the compose project this stack is running under.
+
+    docker compose derives the project name from the compose file's parent
+    directory by default. When the sidecar runs `docker compose ...` from
+    inside its own container, the file lives at /workspace/* and compose
+    would call the project "workspace" — but the user's stack was started
+    from a different cwd and so registered under a different name.
+    Detect the actual project by looking at any container running under
+    docker compose; they all carry com.docker.compose.project as a label.
+    """
+    result = subprocess.run(
+        ["docker", "ps",
+         "--filter", "label=com.docker.compose.project",
+         "--format", '{{index .Labels "com.docker.compose.project"}}'],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        log.warning("docker ps failed during project detection: %s", result.stderr.strip())
+        return None
+    projects = {p.strip() for p in result.stdout.splitlines() if p.strip()}
+    if len(projects) == 1:
+        return next(iter(projects))
+    if len(projects) > 1:
+        log.warning(
+            "multiple compose projects running (%s); set COMPOSE_PROJECT_NAME to disambiguate",
+            ", ".join(sorted(projects)),
+        )
+    return None
+
+
+def _compose_args(workspace: Path) -> list[str]:
+    args = ["docker", "compose"]
+    project = os.environ.get("COMPOSE_PROJECT_NAME") or _detect_project_name()
+    if project:
+        args += ["-p", project]
+    args += [
+        "-f", str(workspace / "compose-base.yaml"),
+        "-f", str(workspace / "compose-groups.generated.yaml"),
+    ]
+    return args
+
+
+# --- operations -------------------------------------------------------------
+
 def regenerate_groups(workspace: Path) -> None:
     """Run scripts/generate-groups.sh to re-render configs + compose snippet."""
     script = workspace / "scripts" / "generate-groups.sh"
     if not script.exists():
         raise OperationError(f"missing script: {script}")
+    log.info("running %s", script)
     result = subprocess.run(
         ["bash", str(script)],
         cwd=workspace,
@@ -32,14 +85,10 @@ def regenerate_groups(workspace: Path) -> None:
             f"stdout:\n{result.stdout}\n"
             f"stderr:\n{result.stderr}"
         )
-
-
-def _compose_args(workspace: Path) -> list[str]:
-    return [
-        "docker", "compose",
-        "-f", str(workspace / "compose-base.yaml"),
-        "-f", str(workspace / "compose-groups.generated.yaml"),
-    ]
+    # The script's own progress lines are useful — surface them.
+    for line in result.stdout.splitlines():
+        if line.strip():
+            log.info("generate: %s", line)
 
 
 def sighup_poller(workspace: Path, group: str) -> bool:
@@ -52,12 +101,21 @@ def sighup_poller(workspace: Path, group: str) -> bool:
     """
     service = f"ktranslate_snmp_{group}"
     base = _compose_args(workspace)
+    log.info("checking poller status: service=%s args=%s", service, " ".join(base))
 
     check = subprocess.run(
         base + ["ps", "--status", "running", "--services"],
         capture_output=True, text=True, check=False,
     )
-    if service not in check.stdout.splitlines():
+    running = [s.strip() for s in check.stdout.splitlines() if s.strip()]
+    log.info("running services: %s", running or "(none)")
+
+    if service not in running:
+        log.warning(
+            "service %s not in running set; skipping SIGHUP. "
+            "Config changes will take effect when the poller next starts.",
+            service,
+        )
         return False
 
     result = subprocess.run(
@@ -69,4 +127,5 @@ def sighup_poller(workspace: Path, group: str) -> bool:
             f"docker compose kill failed (rc={result.returncode}):\n"
             f"stderr:\n{result.stderr}"
         )
+    log.info("sent SIGHUP to %s", service)
     return True

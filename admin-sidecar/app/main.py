@@ -6,6 +6,7 @@ read → edit → regenerate → SIGHUP. The rest of the planned endpoint
 surface (devices, discovery, /test, /status) goes in follow-ups once
 the round-trip is verified end-to-end against a live stack.
 """
+import logging
 import os
 from pathlib import Path
 
@@ -15,6 +16,12 @@ from pydantic import BaseModel, Field
 from .env_parser import parse_env_file, write_env_file
 from .operations import OperationError, regenerate_groups, sighup_poller
 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+)
+log = logging.getLogger("ktranslate-admin")
 
 WORKSPACE = Path(os.environ.get("WORKSPACE", "/workspace"))
 GROUPS_DIR = WORKSPACE / "groups"
@@ -128,12 +135,16 @@ def update_group(name: str, update: GroupUpdate) -> GroupDetail:
         changes["TARGETS"] = ",".join(update.targets)
 
     if changes:
+        log.info("updating group %s: %s", name, changes)
         write_env_file(path, changes)
         try:
             regenerate_groups(WORKSPACE)
             sighup_poller(WORKSPACE, name)
         except OperationError as exc:
+            log.error("operation failed: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+    else:
+        log.info("update for group %s contained no changes", name)
 
     return _detail_from_env(name, parse_env_file(path))
 
