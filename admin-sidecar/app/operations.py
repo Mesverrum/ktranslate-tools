@@ -67,14 +67,37 @@ def _compose_args(workspace: Path) -> list[str]:
 # --- operations -------------------------------------------------------------
 
 def regenerate_groups(workspace: Path) -> None:
-    """Run scripts/generate-groups.sh to re-render configs + compose snippet."""
+    """Run scripts/generate-groups.sh to re-render configs + compose snippet.
+
+    If KTRANS_HOST_PATH is set in the sidecar's environment, it's forwarded
+    to the generator as REPO_PATH so the bind-mount sources baked into
+    compose-groups.generated.yaml resolve correctly on the docker host.
+    Without this, the generator's self-derived REPO_ROOT picks up the
+    sidecar's /workspace mount path, which doesn't exist on the host —
+    docker then auto-creates empty directories at those paths and pollers
+    crash with 'is a directory' when mounting their snmp.yaml.
+    """
     script = workspace / "scripts" / "generate-groups.sh"
     if not script.exists():
         raise OperationError(f"missing script: {script}")
     log.info("running %s", script)
+
+    env = os.environ.copy()
+    host_path = os.environ.get("KTRANS_HOST_PATH")
+    if host_path:
+        env["REPO_PATH"] = host_path
+        log.info("overriding REPO_PATH=%s (KTRANS_HOST_PATH)", host_path)
+    else:
+        log.info(
+            "KTRANS_HOST_PATH not set; generator will derive REPO_PATH from its own "
+            "filesystem location. This is fine on host runs but will break compose "
+            "bind-mounts when the sidecar regenerates."
+        )
+
     result = subprocess.run(
         ["bash", str(script)],
         cwd=workspace,
+        env=env,
         capture_output=True,
         text=True,
         check=False,

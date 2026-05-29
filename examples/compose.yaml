@@ -35,3 +35,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - WORKSPACE=/workspace
+      # The sidecar forwards this to scripts/generate-groups.sh as REPO_PATH,
+      # so the bind-mount sources baked into compose-groups.generated.yaml
+      # use the docker host's filesystem path (where the poller containers
+      # will look for their configs), not /workspace (which only exists
+      # inside the sidecar). ${PWD} resolves to whatever directory you run
+      # `docker compose up` from — typically your KtransToGrafana checkout.
+      - KTRANS_HOST_PATH=${PWD}
